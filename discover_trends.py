@@ -3,18 +3,50 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from database import SessionLocal
 from models import Article, ArticleStatus, Cluster
 import time
+import requests
+
+def get_free_proxies():
+    """Fetches a list of free HTTP proxies."""
+    try:
+        response = requests.get("https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all")
+        if response.status_code == 200:
+            return response.text.splitlines()
+    except Exception as e:
+        print(f"⚠️ Failed to fetch free proxies: {e}")
+    return []
 
 def get_video_transcript(video_id):
+    # 1. Try without proxy first
     try:
-        # We tell the API to look for English first, then Hindi
-        transcript_list = YouTubeTranscriptApi().fetch(video_id, languages=['en', 'hi'])
-        transcript_data = transcript_list.to_raw_data()
-        
-        transcript = " ".join([t['text'] for t in transcript_data])
-        return transcript
+        fetched_transcript = YouTubeTranscriptApi().fetch(video_id, languages=['en', 'hi'])
+        transcript_data = fetched_transcript.to_raw_data()
+        return " ".join([t['text'] for t in transcript_data])
     except Exception as e:
-        print(f"❌ Could not extract transcript for {video_id}: {e}")
-        return None
+        print(f"🔄 VPS IP blocked for {video_id}. Attempting free proxies...")
+
+    # 2. Try with a rotation of free proxies
+    proxies_list = get_free_proxies()
+    # Try the top 10 proxies from the list
+    for proxy in proxies_list[:10]:
+        proxy_dict = {
+            "http": f"http://{proxy}",
+            "https": f"http://{proxy}"
+        }
+        try:
+            # Note: youtube_transcript_api requires proxies passed as a dict
+            fetched_transcript = YouTubeTranscriptApi().fetch(
+                video_id, 
+                languages=['en', 'hi'], 
+                proxies=proxy_dict
+            )
+            transcript_data = fetched_transcript.to_raw_data()
+            print(f"✅ Success using proxy: {proxy}")
+            return " ".join([t['text'] for t in transcript_data])
+        except:
+            continue # Try next proxy if this one fails
+            
+    print(f"❌ All 10 free proxies failed for {video_id}.")
+    return None
 
 def discover_trending_content(cluster_name):
     db = SessionLocal()
